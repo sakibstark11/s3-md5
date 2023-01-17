@@ -6,7 +6,7 @@ from hashlib import md5
 from multiprocessing import cpu_count
 from time import perf_counter
 
-from boto3 import client
+from boto3 import Session
 from mypy_boto3_s3 import S3Client
 
 
@@ -56,16 +56,17 @@ def get_range_bytes(s3_client: S3Client,
     return body
 
 
-def parse_file_md5(s3_client: S3Client,
+def parse_file_md5(session: Session,
                    bucket: str,
                    file_name: str,
                    chunk_size: int,
                    workers: int) -> str:
     '''main function to orchestrate the md5 generation of s3 object'''
+    s3_client = session.client('s3')
     file_size = get_file_size(s3_client, bucket, file_name)
     if file_size < chunk_size:
         raise AssertionError('file size cannot be smaller than chunk size')
-    logging.info(f'file size {file_size}')
+    logging.info(f'file size {file_size} bytes')
     file_chunk_count = file_size // chunk_size
     logging.info(f'file chunk count {file_chunk_count}')
 
@@ -81,18 +82,16 @@ def parse_file_md5(s3_client: S3Client,
             range(file_chunk_count))
 
         hash_object = md5()
-
         logging.info('downloading')
         for result in results:
             hash_object.update(result)
-
         return hash_object.hexdigest()
 
 
 def parse_args():
     '''parses command line arguments'''
     DEFAULT_WORKERS = cpu_count() * 2 - 1
-    DEFAULT_CHUNK_SIZE = 1000000
+    DEFAULT_CHUNK_SIZE_BYTES = 1000000
 
     parser = ArgumentParser(description='parse md5 of an s3 object')
     parser.add_argument('bucket',
@@ -105,8 +104,8 @@ def parse_args():
                         default=DEFAULT_WORKERS,
                         help='number of cpu threads to use for downloading')
     parser.add_argument('-c', '--chunk_size', type=int,
-                        default=DEFAULT_CHUNK_SIZE,
-                        help='chunk size to download on each request')
+                        default=DEFAULT_CHUNK_SIZE_BYTES,
+                        help='chunk size in bytes to download on each request')
     return parser.parse_args()
 
 
@@ -119,9 +118,9 @@ if __name__ == '__main__':
     start_time = perf_counter()
 
     args = parse_args()
-    main_s3_client = client('s3')
+    main_s3_session = Session()
     md5_hash = parse_file_md5(
-        main_s3_client,
+        main_s3_session,
         args.bucket,
         args.file_name,
         args.chunk_size,
